@@ -343,7 +343,7 @@ ASGI_APPLICATION = "paperless.asgi.application"
 STATIC_URL = os.getenv("PAPERLESS_STATIC_URL", BASE_URL + "static/")
 WHITENOISE_STATIC_PREFIX = "/static/"
 
-if machine().lower() == "aarch64":
+if machine().lower() == "aarch64":  # pragma: no cover
     _backend = "django.contrib.staticfiles.storage.StaticFilesStorage"
 else:
     _backend = "whitenoise.storage.CompressedStaticFilesStorage"
