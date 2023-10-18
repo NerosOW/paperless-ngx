@@ -33,6 +33,66 @@ RUN set -eux \
   && echo "Generating requirement.txt" \
     && pipenv requirements > requirements.txt
 
+# Stage: static-compression
+# Purpose: Compresses the static files ahead of time, using whitenoise
+# Comments:
+#  - Uses the same cache ID to help with speeding up the second install below
+#  - Minimal set of Python packages installed here
+#  - Versions shouldn't matter here
+FROM --platform=$BUILDPLATFORM docker.io/python:3.11-slim-bookworm as static-compression
+
+WORKDIR /usr/src/paperless/src/
+
+# copy backend
+COPY ./src ./
+
+# copy frontend
+COPY --from=compile-frontend /src/src/documents/static/frontend/ ./documents/static/frontend/
+
+# hadolint ignore=DL3042
+RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
+  set -eux \
+  && echo "Installing basic dependencies" \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      curl \
+      patch \
+      libmagic1 \
+  && echo "Installing minimal Python dependencies" \
+    && python3 -m pip install --default-timeout=1000 \
+      django \
+      whitenoise \
+      brotli \
+      zstandard \
+      celery \
+      concurrent-log-handler \
+      python-dotenv \
+      django-cors-headers \
+      django-extensions \
+      djangorestframework \
+      python-ipware \
+      django-filter \
+      django-celery-results \
+      django-guardian \
+      django-extensions \
+      pathvalidate \
+      django-multiselectfield \
+      python-magic \
+      filelock \
+  && echo "Patching whitenoise for compression speedup" \
+    && curl --fail --silent --show-error --location --output 484.patch https://github.com/evansd/whitenoise/pull/484.patch \
+    && patch -d /usr/local/lib/python3.11/site-packages --verbose -p2 < 484.patch \
+  && echo "Compressing static files" \
+      && python3 manage.py collectstatic --clear --no-input --link \
+  && echo "Cleaning up image" \
+    && apt-get --yes autoremove --purge \
+    && apt-get clean --yes \
+    && rm --recursive --force --verbose /var/lib/apt/lists/* \
+    && rm --recursive --force --verbose /tmp/* \
+    && rm --recursive --force --verbose /var/tmp/* \
+    && rm --recursive --force --verbose /var/cache/apt/archives/* \
+    && truncate --size 0 /var/log/*log
+
 # Stage: main-app
 # Purpose: The final image
 # Comments:
@@ -223,10 +283,7 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
     && truncate --size 0 /var/log/*log
 
 # copy backend
-COPY ./src ./
-
-# copy frontend
-COPY --from=compile-frontend /src/src/documents/static/frontend/ ./documents/static/frontend/
+COPY --from=static-compression /usr/src/paperless/src/ ./
 
 # add users, setup scripts
 # Mount the compiled frontend to expected location

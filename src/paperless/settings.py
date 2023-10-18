@@ -7,7 +7,6 @@ import re
 import tempfile
 from os import PathLike
 from pathlib import Path
-from platform import machine
 from typing import Final
 from typing import Optional
 from typing import Union
@@ -343,17 +342,11 @@ ASGI_APPLICATION = "paperless.asgi.application"
 STATIC_URL = os.getenv("PAPERLESS_STATIC_URL", BASE_URL + "static/")
 WHITENOISE_STATIC_PREFIX = "/static/"
 
-if machine().lower() == "aarch64":  # pragma: no cover
-    _backend = "django.contrib.staticfiles.storage.StaticFilesStorage"
-else:
-    _backend = "whitenoise.storage.CompressedStaticFilesStorage"
-
 STORAGES = {
     "staticfiles": {
-        "BACKEND": _backend,
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
-del _backend
 
 _CELERY_REDIS_URL, _CHANNELS_REDIS_URL = _parse_redis_url(
     os.getenv("PAPERLESS_REDIS", None),
