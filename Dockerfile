@@ -82,7 +82,7 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
   && echo "Patching whitenoise for compression speedup" \
     && curl --fail --silent --show-error --location --output 484.patch https://github.com/evansd/whitenoise/pull/484.patch \
     && patch -d /usr/local/lib/python3.11/site-packages --verbose -p2 < 484.patch \
-  && echo "Compressing static files" \
+  && echo "Collecting and compressing static files" \
       && python3 manage.py collectstatic --clear --no-input --link \
   && echo "Cleaning up image" \
     && apt-get --yes autoremove --purge \
@@ -298,8 +298,7 @@ RUN set -eux \
     && mkdir --parents --verbose /usr/src/paperless/export \
   && echo "Adjusting all permissions" \
     && chown --recursive paperless:paperless /usr/src/paperless \
-  && echo "Collecting static files" \
-    && gosu paperless python3 manage.py collectstatic --clear --no-input --link \
+  && echo "Compile messages" \
     && gosu paperless python3 manage.py compilemessages
 
 VOLUME ["/usr/src/paperless/data", \
