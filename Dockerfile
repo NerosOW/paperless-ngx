@@ -16,12 +16,22 @@ RUN set -eux \
 RUN set -eux \
   && ./node_modules/.bin/ng build --configuration production
 
+
+# Stage: python-base
+# Purpose: Single base stage to change Python version and set Python related
+#          environment
+FROM docker.io/python:3.11-slim-bookworm as python-base
+
+# https://docs.python.org/3/using/cmdline.html#envvar-PYTHONDONTWRITEBYTECODE
+ENV PYTHONDONTWRITEBYTECODE=1
+
 # Stage: pipenv-base
 # Purpose: Generates a requirements.txt file for building
 # Comments:
 #  - pipenv dependencies are not left in the final image
 #  - pipenv can't touch the final image somehow
-FROM --platform=$BUILDPLATFORM docker.io/python:3.11-alpine as pipenv-base
+#  - build platform only instead of doing it twice
+FROM --platform=$BUILDPLATFORM python-base as pipenv-base
 
 WORKDIR /usr/src/pipenv
 
@@ -39,15 +49,15 @@ RUN set -eux \
 #  - Uses the same cache ID to help with speeding up the second install below
 #  - Minimal set of Python packages installed here
 #  - Versions shouldn't matter here
-FROM --platform=$BUILDPLATFORM docker.io/python:3.11-slim-bookworm as static-compression
+FROM --platform=$BUILDPLATFORM python-base as static-compression
 
 WORKDIR /usr/src/paperless/src/
 
 # copy backend
-COPY ./src ./
+COPY ./src /usr/src/paperless/src/
 
 # copy frontend
-COPY --from=compile-frontend /src/src/documents/static/frontend/ ./documents/static/frontend/
+COPY --from=compile-frontend /src/src/documents/static/frontend/ /usr/src/paperless/src/documents/static/frontend/
 
 # hadolint ignore=DL3042
 RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
@@ -97,7 +107,7 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
 # Purpose: The final image
 # Comments:
 #  - Don't leave anything extra in here
-FROM docker.io/python:3.11-slim-bookworm as main-app
+FROM python-base as main-app
 
 LABEL org.opencontainers.image.authors="paperless-ngx team <hello@paperless-ngx.com>"
 LABEL org.opencontainers.image.documentation="https://docs.paperless-ngx.com/"
@@ -196,7 +206,7 @@ RUN set -eux \
 # Changes very infrequently
 WORKDIR /usr/src/paperless/
 
-COPY gunicorn.conf.py .
+COPY gunicorn.conf.py /usr/src/paperless/gunicorn.conf.py
 
 # setup docker-specific things
 # These change sometimes, but rarely
@@ -243,7 +253,7 @@ WORKDIR /usr/src/paperless/src/
 
 # Python dependencies
 # Change pretty frequently
-COPY --from=pipenv-base /usr/src/pipenv/requirements.txt ./
+COPY --from=pipenv-base /usr/src/pipenv/requirements.txt /usr/src/paperless/src/requirements.txt
 
 # Packages needed only for building a few quick Python
 # dependencies
@@ -265,9 +275,6 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
     && python3 -m pip install --no-cache-dir --upgrade wheel \
   && echo "Installing Python requirements" \
     && python3 -m pip install --default-timeout=1000 --requirement requirements.txt \
-    && echo "Patching whitenoise for compression speedup" \
-      && curl --fail --silent --show-error --location --output 484.patch https://github.com/evansd/whitenoise/pull/484.patch \
-      && patch -d /usr/local/lib/python3.11/site-packages --verbose -p2 < 484.patch \
   && echo "Installing NLTK data" \
     && python3 -W ignore::RuntimeWarning -m nltk.downloader -d "/usr/share/nltk_data" snowball_data \
     && python3 -W ignore::RuntimeWarning -m nltk.downloader -d "/usr/share/nltk_data" stopwords \
@@ -283,7 +290,13 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
     && truncate --size 0 /var/log/*log
 
 # copy backend
-COPY --from=static-compression /usr/src/paperless/src/ ./
+COPY ./src /usr/src/paperless/src/
+
+# copy frontend
+COPY --from=compile-frontend /src/src/documents/static/frontend/ /usr/src/paperless/src/documents/static/frontend/
+
+# copy compressed static files
+COPY --from=static-compression /usr/src/paperless/static /usr/src/paperless/static
 
 # add users, setup scripts
 # Mount the compiled frontend to expected location
@@ -298,7 +311,7 @@ RUN set -eux \
     && mkdir --parents --verbose /usr/src/paperless/export \
   && echo "Adjusting all permissions" \
     && chown --recursive paperless:paperless /usr/src/paperless \
-  && echo "Compile messages" \
+  && echo "Building translations" \
     && gosu paperless python3 manage.py compilemessages
 
 VOLUME ["/usr/src/paperless/data", \
