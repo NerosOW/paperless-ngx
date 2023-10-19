@@ -47,7 +47,7 @@ RUN set -eux \
 # Purpose: Compresses the static files ahead of time, using whitenoise
 # Comments:
 #  - Uses the same cache ID to help with speeding up the second install below
-#  - Minimal set of Python packages installed here
+#  - Minimal set of Python packages installed here to run collectstatic
 #  - Versions shouldn't matter here
 FROM --platform=$BUILDPLATFORM python-base as static-compression
 
@@ -289,17 +289,10 @@ RUN --mount=type=cache,target=/root/.cache/pip/,id=pip-cache \
     && rm --recursive --force --verbose /var/cache/apt/archives/* \
     && truncate --size 0 /var/log/*log
 
-# copy backend
-COPY ./src /usr/src/paperless/src/
-
-# copy frontend
-COPY --from=compile-frontend /src/src/documents/static/frontend/ /usr/src/paperless/src/documents/static/frontend/
-
 # copy compressed static files
-COPY --from=static-compression /usr/src/paperless/static /usr/src/paperless/static
+COPY --from=static-compression /usr/src/paperless/ /usr/src/paperless/
 
-# add users, setup scripts
-# Mount the compiled frontend to expected location
+# add users, create folders and adjust permissions
 RUN set -eux \
   && echo "Setting up user/group" \
     && addgroup --gid 1000 paperless \
